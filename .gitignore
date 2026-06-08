@@ -1,2 +1,8 @@
 perfil_google_bot/
 .venv/
+credentials.json
+token_gmail.json
+__pycache__
+dist/
+build/
+perfil_real/
