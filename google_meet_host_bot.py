@@ -14,6 +14,15 @@ from googleapiclient.discovery import build
 # Escopos necessários para enviar e-mail via Gmail API
 GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
 
+# Mapeamento dos nomes exatos que o Google usa nos botões
+STATUS_CORES = {
+    "pendente": "Grafite",              # Bot precisa configurar
+    "ignorar_manual": "Pavão",          # Bot ignora (feito pela equipe)
+    "sucesso_com_coorganizador": "Banana",
+    "sucesso_sem_coorganizador": "Uva",
+    "falha_coorganizador_aviso": "Tomate"
+}
+
 
 def obter_servico_gmail():
     """Autentica via OAuth2 e retorna o serviço Gmail API pronto para uso."""
@@ -82,6 +91,95 @@ def enviar_email_coorganizador(service, email_destinatario, nome_destinatario):
         return True
     except Exception as e:
         print(f"    [ERRO] Falha ao enviar e-mail para {email_destinatario}: {e}")
+        return False
+
+
+def obter_cor_evento(page):
+    """Lê a cor atual do evento no editor do Google Calendar sem precisar abrir menus."""
+    try:
+        # Localiza o botão principal de cor usando o trecho do aria-label que é padrão
+        # O 'i' no final de '*=marcador de cor' garante que ele ignore maiúsculas/minúsculas
+        btn_cor = page.locator("div[role='button'][aria-label*='marcador de cor' i]").first
+        
+        # Espera o elemento estar visível na tela (timeout de 3 segundos)
+        btn_cor.wait_for(state="visible", timeout=3000)
+        
+        # Extrai o aria-label completo (Ex: "Adicionar um marcador de cor Grafite")
+        label_atual = btn_cor.get_attribute("aria-label")
+        
+        # Extrai também o código hexadecimal caso precise como fallback (Ex: "#616161")
+        hex_atual = btn_cor.get_attribute("data-color")
+        
+        print(f"  [INFO] Cor atual lida com sucesso: '{label_atual}' ({hex_atual})")
+        
+        print(f"cor do botão: {btn_cor}")
+
+        # Retorna a string completa para você comparar no seu dicionário STATUS_CORES
+        return label_atual
+
+    except Exception as e:
+        print(f"  [AVISO] Não foi possível ler a cor do evento: {e}")
+        return None
+
+
+def alterar_cor_evento(page, nome_cor):
+    """Altera a cor do evento selecionando a cor especificada pelo nome."""
+    try:
+        print(f"  [COR] Tentando alterar a cor do evento para: '{nome_cor}'...")
+        # 1. Localiza o botão principal de cor
+        btn_cor = page.locator("div[role='button'][aria-label*='marcador de cor' i]").first
+        btn_cor.wait_for(state="visible", timeout=3000)
+        btn_cor.click()
+        time.sleep(1.5)
+
+        print(f"cor do botão para alteração: {btn_cor}")
+
+        # 2. Procura a opção da cor pelo seu nome na lista/menu que se abriu
+        # Google Calendar usa botões com aria-label contendo o nome da cor em português (ex: "Banana", "Tomate", etc.)
+        seletores = [
+            f"[role='menuitemradio'][aria-label*='{nome_cor}' i]",
+            f"[role='menuitem'][aria-label*='{nome_cor}' i]",
+            f"[aria-label*='{nome_cor}' i]",
+        ]
+
+        opcao_cor = None
+        for sel in seletores:
+            try:
+                loc = page.locator(sel).first
+                if loc.is_visible(timeout=1000):
+                    opcao_cor = loc
+                    print(f"    [COR] Opção de cor encontrada com o seletor: '{sel}'")
+                    break
+            except Exception:
+                continue
+
+        if not opcao_cor:
+            try:
+                loc = page.get_by_role("menuitemradio", name=re.compile(nome_cor, re.IGNORECASE)).first
+                if loc.is_visible(timeout=1000):
+                    opcao_cor = loc
+                    print(f"    [COR] Opção de cor encontrada via get_by_role('menuitemradio', name='{nome_cor}')")
+            except Exception:
+                pass
+
+        if opcao_cor:
+            opcao_cor.click()
+            time.sleep(1.5)
+            print(f"  [COR] Cor do evento alterada para '{nome_cor}' com sucesso.")
+            return True
+        else:
+            print(f"  [ERRO] Não foi possível encontrar a opção da cor '{nome_cor}' no menu.")
+            # Fecha o menu apertando Escape para não deixar travado
+            page.keyboard.press("Escape")
+            time.sleep(0.5)
+            return False
+
+    except Exception as e:
+        print(f"  [ERRO] Falha ao alterar a cor do evento para '{nome_cor}': {e}")
+        try:
+            page.keyboard.press("Escape")
+        except Exception:
+            pass
         return False
 
 
@@ -261,6 +359,28 @@ def rodar_bot_google():
                 page.keyboard.press("Escape")
                 continue
 
+            # --- VERIFICAÇÃO DE COR ---
+            cor_atual = obter_cor_evento(page)
+            pular_evento = False
+            if cor_atual:
+                print(f"  [COR] Cor atual do evento: {cor_atual}")
+                if STATUS_CORES["ignorar_manual"] in cor_atual:
+                    print("  [PULAR] Chamada manual (Pavão). O bot não precisa mexer.")
+                    pular_evento = True
+                elif STATUS_CORES["pendente"] not in cor_atual:
+                    print(f"  [PULAR] Evento não é pendente (Grafite). Já foi processado ou é nosso. Pulando...")
+                    pular_evento = True
+                else:
+                    print("  [PROCESSANDO] Chamada pendente (Grafite). Iniciando configuração...")
+            else:
+                print("  [AVISO] Não foi possível detectar a cor. Prosseguindo por segurança...")
+
+            if pular_evento:
+                page.goto("https://calendar.google.com/calendar/r/day")
+                page.wait_for_load_state("domcontentloaded")
+                time.sleep(3)
+                continue
+
             # --- PASSO 3a: COLETAR CONVIDADOS (nome + email) ---
             convidados = []  # Lista de dicts: [{"nome": "...", "email": "..."}]
             try:
@@ -304,7 +424,30 @@ def rodar_bot_google():
                 print(f"  [ERRO] Falha ao coletar convidados: {e}")
 
             if not convidados:
-                print("  [AVISO] Nenhum convidado encontrado. Pulando evento.")
+                print("  [AVISO] Nenhum convidado encontrado. Evento SEM organizadores.")
+                # Muda a cor para Uva (Roxo) - configurado sem organizadores
+                alterar_cor_evento(page, STATUS_CORES["sucesso_sem_coorganizador"])
+                # Salva o evento com a nova cor
+                try:
+                    btn_salvar = page.get_by_role(
+                        "button", name=re.compile(r"Salvar|Save", re.IGNORECASE)
+                    ).first
+                    if btn_salvar.is_visible():
+                        btn_salvar.click()
+                        time.sleep(2)
+                        print("  Evento salvo com cor Roxo (sem organizadores).")
+                        try:
+                            btn_enviar = page.get_by_role(
+                                "button",
+                                name=re.compile(r"Enviar|Send|Não enviar|Don't send", re.IGNORECASE),
+                            ).first
+                            if btn_enviar.is_visible(timeout=3000):
+                                btn_enviar.click()
+                                time.sleep(1)
+                        except Exception:
+                            pass
+                except Exception as e:
+                    print(f"  [ERRO] Falha ao salvar evento sem organizadores: {e}")
                 # Volta para a visualização de 'Dia'
                 page.goto("https://calendar.google.com/calendar/r/day")
                 page.wait_for_load_state("domcontentloaded")
@@ -526,37 +669,28 @@ def rodar_bot_google():
                         time.sleep(2)
 
                         # --- VERIFICAÇÃO DO CARD FLUTUANTE ---
-                        # Após digitar o nome, o Google Meet gera um card flutuante de sugestão
-                        # DENTRO do iframe do modal. Exemplo de locator real:
-                        # iframe[title="Opções da videochamada"].content_frame.get_by_role("option", name="Adicionar Ricardo Bizerra de")
+                        # Após digitar o nome, o Google Meet gera um card flutuante de sugestão.
+                        # Substituído pela busca direta do atributo aria-label contendo o nome do convidado.
                         card_encontrado = False
                         try:
-                            # Tenta encontrar o card dentro do target_container (iframe)
-                            # O card tem role="option" com texto "Adicionar <nome>" ou "Add <nome>"
-                            card_option = target_container.get_by_role("option", name=re.compile(rf"Adicionar.*{re.escape(nome.split()[0])}|Add.*{re.escape(nome.split()[0])}", re.IGNORECASE)).first
+                            # Escapa caracteres especiais para evitar quebra no seletor CSS
+                            nome_escapado = nome.replace('\\', '\\\\').replace('"', '\\"')
+                            card_option = target_container.locator(f'[aria-label*="{nome_escapado}" i]').first
                             if card_option.is_visible(timeout=3000):
                                 card_encontrado = True
-                                print(f"    [CARD] Card flutuante encontrado para: {nome}")
+                                print(f"    [CARD] Card flutuante encontrado via aria-label (nome completo) para: {nome}")
                         except Exception:
                             pass
 
-                        # Fallback: tenta buscar qualquer role="option" com "Adicionar" dentro do iframe
+                        # Fallback usando o primeiro nome se a busca por nome completo não encontrar
                         if not card_encontrado:
                             try:
-                                card_option = target_container.get_by_role("option", name=re.compile(r"Adicionar|Add", re.IGNORECASE)).first
+                                primeiro_nome = nome.split()[0]
+                                primeiro_nome_escapado = primeiro_nome.replace('\\', '\\\\').replace('"', '\\"')
+                                card_option = target_container.locator(f'[aria-label*="{primeiro_nome_escapado}" i]').first
                                 if card_option.is_visible(timeout=2000):
                                     card_encontrado = True
-                                    print(f"    [CARD] Card flutuante genérico encontrado para: {nome}")
-                            except Exception:
-                                pass
-
-                        # Fallback: busca role="option" genérico dentro do iframe
-                        if not card_encontrado:
-                            try:
-                                card_option = target_container.locator("[role='option']").first
-                                if card_option.is_visible(timeout=1500):
-                                    card_encontrado = True
-                                    print(f"    [CARD] Card option genérico encontrado para: {nome}")
+                                    print(f"    [CARD] Card flutuante encontrado via aria-label (primeiro nome) para: {nome}")
                             except Exception:
                                 pass
 
@@ -606,7 +740,7 @@ def rodar_bot_google():
                         convidado["nome"]
                     )
 
-            # --- PASSO 3e: SALVAR AS CONFIGURAÇÕES ---
+            # --- PASSO 3e: SALVAR AS CONFIGURAÇÕES DO MODAL ---
             try:
                 # Reobtém referência ao modal e ao container
                 modal = page.get_by_role("dialog", name=re.compile(r"Opções da videochamada|Video conferencing options", re.IGNORECASE)).first
@@ -635,7 +769,19 @@ def rodar_bot_google():
             except Exception as e:
                 print(f"  [AVISO] Erro ao salvar opções de videochamada no modal: {e}")
 
-            # Salva o evento inteiro
+            # --- PASSO 3f: ALTERAR COR DO EVENTO COM BASE NO RESULTADO ---
+            conseguiu_adicionar = (convidados_adicionados > 0) and (not convidados_sem_card)
+            precisa_de_organizador = len(convidados) > 0
+
+            if conseguiu_adicionar:
+                alterar_cor_evento(page, STATUS_CORES["sucesso_com_coorganizador"])
+            elif precisa_de_organizador and not conseguiu_adicionar:
+                # Fallback: Virou convidado, mas não coorganizador
+                alterar_cor_evento(page, STATUS_CORES["falha_coorganizador_aviso"])
+            else:
+                alterar_cor_evento(page, STATUS_CORES["sucesso_sem_coorganizador"])
+
+            # --- PASSO 3g: SALVAR O EVENTO INTEIRO ---
             try:
                 btn_salvar_evento = page.get_by_role(
                     "button", name=re.compile(r"Salvar|Save", re.IGNORECASE)
