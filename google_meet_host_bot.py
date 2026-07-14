@@ -137,6 +137,49 @@ def enviar_email_coorganizador(service, email_destinatario, nome_destinatario):
         return False
 
 
+def enviar_email_relatorio(service, email_destinatario, eventos_pavao, eventos_tomate):
+    """Envia um relatório final com eventos manuais e falhas."""
+    if not service:
+        print("    [AVISO] Serviço Gmail não disponível. Relatório não enviado.")
+        return False
+
+    if not eventos_pavao and not eventos_tomate:
+        return True  # Não há nada para relatar
+
+    assunto = "Relatório de Eventos - Bot Meet"
+
+    corpo = "Resumo dos eventos processados:\n\n"
+    if eventos_pavao:
+        corpo += "Eventos que exigem trabalho manual (Pavão):\n"
+        for ev in eventos_pavao:
+            corpo += f" - {ev}\n"
+        corpo += "\n"
+
+    if eventos_tomate:
+        corpo += "Eventos com falha ao adicionar coorganizador (Tomate):\n"
+        for ev in eventos_tomate:
+            corpo += f" - {ev}\n"
+        corpo += "\n"
+
+    corpo += "Atenciosamente,\nBot de Configuração do Google Meet"
+
+    mensagem = MIMEText(corpo, "plain", "utf-8")
+    mensagem["to"] = email_destinatario
+    mensagem["subject"] = assunto
+
+    raw = base64.urlsafe_b64encode(mensagem.as_bytes()).decode("utf-8")
+
+    try:
+        service.users().messages().send(
+            userId="me", body={"raw": raw}
+        ).execute()
+        print(f"    [EMAIL] Relatório enviado com sucesso para: {email_destinatario}")
+        return True
+    except Exception as e:
+        print(f"    [ERRO] Falha ao enviar relatório para {email_destinatario}: {e}")
+        return False
+
+
 def obter_cor_evento(page):
     """Lê a cor atual do evento no editor do Google Calendar sem precisar abrir menus."""
     try:
@@ -226,9 +269,12 @@ def alterar_cor_evento(page, nome_cor):
         return False
 
 
-def rodar_bot_google():
+def rodar_bot_google(servico_global=None):
     with sync_playwright() as p:
         print("Iniciando o navegador...")
+
+        eventos_pavao = []
+        eventos_tomate = []
 
         # PERFIL PERSISTENTE para manter login entre execuções
         if getattr(sys, 'frozen', False):
@@ -409,6 +455,8 @@ def rodar_bot_google():
                     if cor_detectada != STATUS_CORES["pendente"]:
                         pular_evento = True
                         motivo_pular = f"Cor ({cor_detectada}) não é Grafite"
+                        if cor_detectada == STATUS_CORES["ignorar_manual"]:
+                            eventos_pavao.append(f"{dia:02d}/{mes:02d}/{ano} - {titulo}")
 
                     # 4. Verifica a presença do Google Meet
                     if not pular_evento:
@@ -702,7 +750,7 @@ def rodar_bot_google():
                 convidados_sem_card = []  # Lista de convidados onde o card flutuante não apareceu
 
                 # Inicializa o serviço Gmail uma vez (lazy, só se necessário)
-                servico_gmail = None
+                servico_gmail = servico_global
 
                 if convidados and target_container:
                     try:
@@ -834,6 +882,7 @@ def rodar_bot_google():
                 else:
                     # Falha ao adicionar algum convidado → Tomate
                     alterar_cor_evento(page, STATUS_CORES["falha_coorganizador_aviso"])
+                    eventos_tomate.append(f"{dia:02d}/{mes:02d}/{ano} - {titulo}")
 
                 # --- PASSO 3g: SALVAR O EVENTO INTEIRO ---
                 try:
@@ -872,6 +921,20 @@ def rodar_bot_google():
         print("\n" + "=" * 60)
         print("[FIM] Todas as reuniões da agenda foram processadas!")
         print("=" * 60)
+        
+        # Envia email de relatório no final
+        if servico_global and (eventos_pavao or eventos_tomate):
+            try:
+                perfil = servico_global.users().getProfile(userId='me').execute()
+                email_logado = perfil.get('emailAddress')
+                if email_logado:
+                    print(f"\nEnviando relatório para {email_logado}...")
+                    enviar_email_relatorio(servico_global, email_logado, eventos_pavao, eventos_tomate)
+                else:
+                    print("\n[ERRO] Não foi possível obter o email do perfil logado.")
+            except Exception as e:
+                print(f"\n[ERRO] Falha ao obter perfil ou enviar relatório: {e}")
+        
         input("Pressione Enter no terminal para encerrar o navegador...")
         context.close()
 
@@ -890,4 +953,4 @@ if __name__ == "__main__":
     print("=" * 60)
     print("\nFASE 2: Inicialização do Navegador e Playwright")
     print("=" * 60)
-    rodar_bot_google()
+    rodar_bot_google(servico)
