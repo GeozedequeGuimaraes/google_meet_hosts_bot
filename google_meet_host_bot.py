@@ -79,17 +79,27 @@ def obter_servico_gmail():
 
     creds = None
     if os.path.exists(caminho_token):
-        creds = Credentials.from_authorized_user_file(caminho_token, GMAIL_SCOPES)
+        try:
+            creds = Credentials.from_authorized_user_file(caminho_token, GMAIL_SCOPES)
+        except Exception as e:
+            print(f"[AVISO] Não foi possível carregar o token existente: {e}")
+            creds = None
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
+            try:
+                creds.refresh(Request())
+            except Exception as e:
+                print(f"[AVISO] Não foi possível atualizar o token automaticamente: {e}")
+                print("Tentando realizar uma nova autenticação...")
+                creds = None
+        
+        if not creds:
             if not os.path.exists(caminho_credenciais):
                 print(f"[ERRO] Arquivo credentials.json não encontrado em: {caminho_credenciais}")
                 return None
             flow = InstalledAppFlow.from_client_secrets_file(caminho_credenciais, GMAIL_SCOPES)
-            creds = flow.run_local_server(port=3009)
+            creds = flow.run_local_server(port=3009, prompt='consent')
         with open(caminho_token, "w") as token_file:
             token_file.write(creds.to_json())
 
@@ -291,7 +301,8 @@ def rodar_bot_google(servico_global=None):
             headless=False,
             ignore_default_args=["--enable-automation"],
             args = [
-                "--disable-notifications",        
+                "--disable-notifications",
+                "--disable-blink-features=AutomationControlled"
             ]
         )
 
@@ -552,6 +563,60 @@ def rodar_bot_google(servico_global=None):
                 except Exception as e:
                     print(f"  [ERRO] Falha ao coletar convidados: {e}")
 
+                # --- EXTRAÇÃO E ADIÇÃO DE EMAILS DA DESCRIÇÃO DO EVENTO ---
+                try:
+                    campo_descricao = page.get_by_role("textbox", name="Descrição")
+                    campo_descricao.wait_for(state="visible", timeout=5000)
+                    campo_descricao.focus()
+                    
+                    texto_descricao = campo_descricao.inner_text() or ""
+                    emails_encontrados = re.findall(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", texto_descricao)
+                    
+                    if emails_encontrados:
+                        print(f"  [DESCRIÇÃO] E-mails detectados na descrição: {emails_encontrados}")
+                        
+                        # Localiza o campo de input para adicionar novos convidados no Calendar
+                        campo_add_guest = page.locator(
+                            "input[aria-label*='Adicionar convidados' i], "
+                            "input[placeholder*='Adicionar convidados' i], "
+                            "input[aria-label*='Add guests' i], "
+                            "input[placeholder*='Add guests' i]"
+                        ).first
+                        
+                        try:
+                            campo_add_guest.wait_for(state="visible", timeout=5000)
+                        except Exception:
+                            campo_add_guest = None
+                            print("  [AVISO] Campo de adicionar convidados não localizado no formulário.")
+                        
+                        for email_enc in emails_encontrados:
+                            email_limpo = email_enc.strip().lower()
+                            if not any(c["email"].lower() == email_limpo for c in convidados):
+                                nome_extraido = email_limpo.split("@")[0]
+                                
+                                # 1. Adiciona fisicamente o convidado no formulário do evento
+                                if campo_add_guest:
+                                    try:
+                                        campo_add_guest.click()
+                                        time.sleep(0.5)
+                                        campo_add_guest.fill(email_limpo)
+                                        time.sleep(1)
+                                        page.keyboard.press("Enter")
+                                        time.sleep(1.5)
+                                        print(f"    [OK] Convidado {email_limpo} adicionado ao evento.")
+                                    except Exception as ex_add:
+                                        print(f"    [ERRO] Falha ao digitar convidado {email_limpo} no formulário: {ex_add}")
+                                
+                                # 2. Adiciona à lista de convidados para posterior coorganização
+                                convidados.append({"nome": nome_extraido, "email": email_limpo})
+                                print(f"    + Adicionado da descrição à lista de coorganização: {nome_extraido} <{email_limpo}>")
+                    else:
+                        print("  [DESCRIÇÃO] Nenhum e-mail encontrado na descrição do evento.")
+                    
+                    print(f"  Lista final consolidada de coorganizadores ({len(convidados)}): {[c['email'] for c in convidados]}")
+                except Exception as ex:
+                    print(f"  [AVISO] Falha ao processar descrição e adicionar e-mails: {ex}")
+
                 # --- PASSO 3b: ABRIR OPÇÕES DE VIDEOCHAMADA (SEMPRE, com ou sem convidados) ---
                 opcoes_video_ok = False
                 try:
@@ -638,70 +703,115 @@ def rodar_bot_google(servico_global=None):
                                     print("    'Gerenciamento de organizadores' já está ativado.")
                             else:
                                 print("    [AVISO] Botão de 'Gerenciamento de organizadores' não localizado.")
+                            
+                            time.sleep(2)
+                            print("  [DEBUG] Pausando para depuração nos controles do organizador...")
+                            page.pause()
                         except Exception as e:
                             print(f"    [ERRO] Falha ao configurar 'Gerenciamento de organizadores': {e}")
+                            page.pause()
 
                         # 2. Tipo de acesso "Abrir" / "Open"
                         try:
-                            radio_abrir = None
-                            for name_pattern in [r"^Abrir$", r"^Open$"]:
-                                try:
-                                    loc = target_container.get_by_role("radio", name=re.compile(name_pattern, re.IGNORECASE)).first
-                                    if loc.is_visible(timeout=1500):
-                                        radio_abrir = loc
-                                        break
-                                except Exception:
-                                    continue
-
-                            if not radio_abrir:
-                                for label_text in ["Abrir", "Open"]:
+                            print("    [DEBUG] Buscando radio 'Abrir' no iframe...")
+                            opcao_abrir = target_container.get_by_role("radio", name="Abrir").first
+                            print("    [DEBUG] Elemento 'Abrir' (radio) referenciado. Aguardando visibilidade...")
+                            opcao_abrir.wait_for(state="visible", timeout=5000)
+                            print("    [DEBUG] Elemento visível. Clicando...")
+                            opcao_abrir.click()
+                            time.sleep(1.5)
+                            print("    [OK] Tipo de acesso 'Abrir' selecionado via radio button.")
+                        except Exception as e:
+                            print(f"    [AVISO] Falha ao selecionar radio 'Abrir': {e}. Tentando via texto direto...")
+                            try:
+                                opcao_abrir_text = target_container.get_by_text("AbrirNinguém precisa pedir").first
+                                opcao_abrir_text.wait_for(state="visible", timeout=3000)
+                                opcao_abrir_text.click()
+                                time.sleep(1.5)
+                                print("    [OK] Tipo de acesso 'Abrir' selecionado via texto.")
+                            except Exception as e_text:
+                                print(f"    [AVISO] Falha ao selecionar via texto: {e_text}. Tentando fallbacks adicionais...")
+                            try:
+                                radio_abrir = None
+                                for name_pattern in [r"^Abrir$", r"^Open$"]:
                                     try:
-                                        loc = target_container.get_by_label(re.compile(f"^{label_text}$", re.IGNORECASE)).first
+                                        loc = target_container.get_by_role("radio", name=re.compile(name_pattern, re.IGNORECASE)).first
                                         if loc.is_visible(timeout=1500):
                                             radio_abrir = loc
                                             break
                                     except Exception:
                                         continue
 
-                            if not radio_abrir:
-                                for selector in [
-                                    "input[name='accessType'][value='1']",
-                                    "input[value='1']",
-                                    "xpath=.//input[@value='1']",
-                                    "xpath=.//input[@name='accessType' and @value='1']",
-                                    "xpath=.//label[text()='Abrir']/preceding-sibling::input",
-                                    "xpath=.//label[contains(text(),'Abrir') or contains(text(),'Open')]",
-                                    "xpath=.//*[@id='yDmH0d']/c-wiz/div/div/div/div/div[1]/div/div[2]/div/div[1]/div/div[7]/div[3]//input",
-                                    "xpath=.//div[contains(@class, 'YRLNPd')]//input",
-                                    "label:has-text('Abrir')",
-                                    "label:has-text('Open')"
-                                ]:
+                                if not radio_abrir:
+                                    for label_text in ["Abrir", "Open"]:
+                                        try:
+                                            loc = target_container.get_by_label(re.compile(f"^{label_text}$", re.IGNORECASE)).first
+                                            if loc.is_visible(timeout=1500):
+                                                radio_abrir = loc
+                                                break
+                                        except Exception:
+                                            continue
+
+                                if not radio_abrir:
+                                    for selector in [
+                                        "input[name='accessType'][value='1']",
+                                        "input[value='1']",
+                                        "xpath=.//input[@value='1']",
+                                        "xpath=.//input[@name='accessType' and @value='1']",
+                                        "xpath=.//label[text()='Abrir']/preceding-sibling::input",
+                                        "xpath=.//label[contains(text(),'Abrir') or contains(text(),'Open')]",
+                                        "xpath=.//*[@id='yDmH0d']/c-wiz/div/div/div/div/div[1]/div/div[2]/div/div[1]/div/div[7]/div[3]//input",
+                                        "xpath=.//div[contains(@class, 'YRLNPd')]//input",
+                                        "label:has-text('Abrir')",
+                                        "label:has-text('Open')"
+                                    ]:
+                                        try:
+                                            loc = target_container.locator(selector).first
+                                            if loc.is_visible(timeout=1000):
+                                                radio_abrir = loc
+                                                break
+                                        except Exception:
+                                            continue
+
+                                if radio_abrir:
+                                    radio_abrir.wait_for(state="visible", timeout=5000)
+                                    is_checked = False
                                     try:
-                                        loc = target_container.locator(selector).first
-                                        if loc.is_visible(timeout=1000):
-                                            radio_abrir = loc
-                                            break
+                                        is_checked = radio_abrir.is_checked()
                                     except Exception:
-                                        continue
+                                        pass
 
-                            if radio_abrir:
-                                radio_abrir.wait_for(state="visible", timeout=5000)
-                                is_checked = False
-                                try:
-                                    is_checked = radio_abrir.is_checked()
-                                except Exception:
-                                    pass
-
-                                if not is_checked:
-                                    print("    Selecionando acesso 'Abrir'...")
-                                    radio_abrir.click()
-                                    time.sleep(1.5)
+                                    if not is_checked:
+                                        print("    Selecionando acesso 'Abrir'...")
+                                        radio_abrir.click()
+                                        time.sleep(1.5)
+                                    else:
+                                        print("    Acesso 'Abrir' já selecionado.")
                                 else:
-                                    print("    Acesso 'Abrir' já selecionado.")
-                            else:
-                                print("    [AVISO] Opção 'Abrir'/'Open' não localizada.")
+                                    print("    [AVISO] Opção 'Abrir'/'Open' não localizada.")
+                            except Exception as ex_fall:
+                                print(f"    [ERRO] Falha no fallback ao configurar acesso 'Abrir': {ex_fall}")
+
+                        # 3. Controle de presença
+                        try:
+                            print("    [DEBUG] Buscando switch 'Controle de presença' no iframe...")
+                            switch_presenca = target_container.get_by_role("switch", name="Controle de presença").first
+                            print("    [DEBUG] Elemento 'Controle de presença' (switch) referenciado. Aguardando visibilidade...")
+                            switch_presenca.wait_for(state="visible", timeout=5000)
+                            print("    [DEBUG] Elemento visível. Clicando...")
+                            switch_presenca.click()
+                            time.sleep(1.5)
+                            print("    [OK] 'Controle de presença' ativado/selecionado via switch role.")
                         except Exception as e:
-                            print(f"    [ERRO] Falha ao configurar acesso 'Abrir': {e}")
+                            print(f"    [AVISO] Falha ao selecionar switch 'Controle de presença': {e}. Tentando via texto...")
+                            try:
+                                switch_presenca_text = target_container.get_by_text("Controle de presençaEnviar").first
+                                switch_presenca_text.wait_for(state="visible", timeout=3000)
+                                switch_presenca_text.click()
+                                time.sleep(1.5)
+                                print("    [OK] 'Controle de presença' ativado/selecionado via texto.")
+                            except Exception as e_text:
+                                print(f"    [ERRO] Falha ao configurar 'Controle de presença': {e_text}")
 
                         # --- PASSO 3d: SE HÁ CONVIDADOS, ADICIONAR COMO COORGANIZADORES ---
                         if convidados:
@@ -896,19 +1006,26 @@ def rodar_bot_google(servico_global=None):
                         time.sleep(2)
                         print("  Evento salvo com sucesso!")
 
-                        # Se aparecer diálogo "Enviar e-mail de atualização?", clica em "Enviar" ou "Não enviar"
+                        # Tratamento dos cards de opções ao salvar
+                        # 1. Primeiro card: Enviar e-mails de atualização
                         try:
-                            btn_enviar = page.get_by_role(
-                                "button",
-                                name=re.compile(
-                                    r"Enviar|Send|Não enviar|Don't send", re.IGNORECASE
-                                ),
-                            ).first
-                            if btn_enviar.is_visible(timeout=3000):
+                            btn_enviar = page.get_by_role("button", name="Enviar", exact=True).first
+                            if btn_enviar.is_visible(timeout=4000):
+                                print("  [SALVAR] Clicando no botão 'Enviar' no primeiro card...")
                                 btn_enviar.click()
-                                time.sleep(1)
-                        except Exception:
-                            pass
+                                time.sleep(2)
+                        except Exception as e_env:
+                            print(f"  [SALVAR] Primeiro card ('Enviar') não apareceu ou falhou: {e_env}")
+
+                        # 2. Segundo card: Convidar convidados externos
+                        try:
+                            btn_convidar_todos = page.get_by_role("button", name="Convidar todos").first
+                            if btn_convidar_todos.is_visible(timeout=4000):
+                                print("  [SALVAR] Clicando no botão 'Convidar todos' no segundo card...")
+                                btn_convidar_todos.click()
+                                time.sleep(2)
+                        except Exception as e_conv:
+                            print(f"  [SALVAR] Segundo card ('Convidar todos') não apareceu ou falhou: {e_conv}")
 
                 except Exception as e:
                     print(f"  [ERRO] Falha ao salvar o evento: {e}")
@@ -953,4 +1070,4 @@ if __name__ == "__main__":
     print("=" * 60)
     print("\nFASE 2: Inicialização do Navegador e Playwright")
     print("=" * 60)
-    rodar_bot_google(servico)
+    rodar_bot_google(servico)
