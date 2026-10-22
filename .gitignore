@@ -1,8 +1,29 @@
-perfil_google_bot/
-.venv/
+# Credenciais e tokens OAuth — nunca commitar
 credentials.json
-token_gmail.json
-__pycache__
+token.json
+
+# Configuração local (sensível)
+config.yaml
+
+# Dados de runtime
+data/
+!data/.gitkeep
+
+# Logs
+*.log
+bot.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+*.egg-info/
 dist/
 build/
-perfil_real/
+
+# Editor
+.DS_Store
+.idea/
+.vscode/

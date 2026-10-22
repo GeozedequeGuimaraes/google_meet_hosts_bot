@@ -1,0 +1,17 @@
+[Unit]
+Description=Bot Meet V2 — Dashboard web
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/bot-meet
+Environment=INCIDENTS_DB=/opt/bot-meet/data/incidents.db
+Environment=DASHBOARD_USERNAME=vlab
+Environment=DASHBOARD_PASSWORD=TROQUE_ESTA_SENHA
+ExecStart=/opt/bot-meet/.venv/bin/uvicorn src.presentation.dashboard:app --host 0.0.0.0 --port 8765
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

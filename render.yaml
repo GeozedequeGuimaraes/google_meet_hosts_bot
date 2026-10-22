@@ -1,0 +1,47 @@
+services:
+  - type: web
+    name: meet-operations-dashboard
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn src.presentation.dashboard:app --host 0.0.0.0 --port $PORT
+
+    envVars:
+      # ── Acesso ao dashboard ────────────────────────────────────────────
+      # Deixe DASHBOARD_ALLOW_ANONYMOUS como "true" para acesso sem senha,
+      # ou defina USERNAME + PASSWORD para proteger com login básico.
+      - key: DASHBOARD_ALLOW_ANONYMOUS
+        value: "true"
+
+      # ── Banco de dados ─────────────────────────────────────────────────
+      - key: INCIDENTS_DB
+        value: data/incidents.db
+
+      # ── Credenciais Google (preencher no painel do Render) ─────────────
+      # Gerar com: base64 -i credentials.json | tr -d '\n'
+      - key: GOOGLE_CREDENTIALS_B64
+        sync: false
+
+      # Gerar com: base64 -i token.json | tr -d '\n'
+      - key: GOOGLE_TOKEN_B64
+        sync: false
+
+      # ── Configuração do bot ────────────────────────────────────────────
+      - key: CALENDAR_ID
+        value: primary
+
+      - key: DRY_RUN
+        value: "false"
+
+      - key: DAYS_AHEAD
+        value: "1"
+
+      - key: DAYS_BEHIND
+        value: "0"
+
+      - key: TIMEZONE
+        value: America/Recife
+
+      # E-mail que recebe o relatório de falhas (opcional)
+      - key: REPORT_EMAIL
+        sync: false

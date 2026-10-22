@@ -1,0 +1,24 @@
+# Copie este arquivo para config.yaml e ajuste os valores antes de rodar o bot.
+calendar_id: primary
+days_ahead: 1
+days_behind: 0
+report_email_override: ""
+credentials_path: credentials.json
+token_path: token.json
+log_level: INFO
+incidents_db_path: data/incidents.db
+webhook_url: ""
+discord_webhook_url: ""
+google_chat_webhook_url: ""
+
+# Horários de execução do bot principal (formato HH:MM, fuso America/Recife).
+# Se vazio, o bot roda uma vez e encerra. Se preenchido, vira serviço contínuo.
+# Exemplo: schedule: ["07:00", "12:00", "18:00"]
+schedule: []
+
+# Horários do job de gravações — deve rodar após o término das aulas do dia.
+# O job busca gravações no Drive das últimas 24h e tenta publicar na plataforma.
+# Exemplo: recording_schedule: ["23:30"]
+recording_schedule: []
+
+timezone: "America/Recife"
