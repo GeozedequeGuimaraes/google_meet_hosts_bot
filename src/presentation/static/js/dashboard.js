@@ -693,6 +693,87 @@ window.addEventListener('hashchange', () => {
   }
 });
 
+/* ── Setup de credenciais ── */
+const setupPanel      = document.getElementById('setup-panel');
+const setupStep1      = document.getElementById('setup-step-1');
+const setupStep2      = document.getElementById('setup-step-2');
+const credentialsFile = document.getElementById('credentials-file');
+const uploadLabel     = document.getElementById('setup-upload-label');
+const fileNameSpan    = document.getElementById('setup-file-name');
+const uploadBtn       = document.getElementById('setup-upload-btn');
+const step1Feedback   = document.getElementById('setup-step1-feedback');
+const step2Feedback   = document.getElementById('setup-step2-feedback');
+
+const showSetupFeedback = (el, msg, ok) => {
+  el.textContent = msg;
+  el.className   = `setup-feedback ${ok ? 'ok' : 'err'}`;
+  el.style.display = 'block';
+};
+
+credentialsFile.addEventListener('change', () => {
+  const file = credentialsFile.files[0];
+  if (file) {
+    fileNameSpan.textContent = file.name;
+    uploadLabel.classList.add('has-file');
+    uploadBtn.disabled = false;
+  } else {
+    fileNameSpan.textContent = 'Clique para selecionar o arquivo';
+    uploadLabel.classList.remove('has-file');
+    uploadBtn.disabled = true;
+  }
+});
+
+uploadBtn.addEventListener('click', async () => {
+  const file = credentialsFile.files[0];
+  if (!file) return;
+  uploadBtn.disabled = true;
+  uploadBtn.textContent = 'Enviando…';
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    const res  = await fetch('/setup/credentials', { method: 'POST', body: form });
+    const data = await res.json();
+    if (!res.ok) {
+      showSetupFeedback(step1Feedback, data.detail || 'Erro ao enviar arquivo.', false);
+      uploadBtn.disabled = false;
+      uploadBtn.textContent = 'Próximo';
+      return;
+    }
+    setupStep1.hidden = true;
+    setupStep2.hidden = false;
+  } catch {
+    showSetupFeedback(step1Feedback, 'Erro de conexão.', false);
+    uploadBtn.disabled = false;
+    uploadBtn.textContent = 'Próximo';
+  }
+});
+
+const _showMain = () => {
+  setupPanel.hidden    = true;
+  document.querySelector('.topbar').hidden = false;
+  document.getElementById('config-panel').hidden = true;
+  document.getElementById('incidents-panel').hidden = false;
+};
+
+const _showSetup = hasCredentials => {
+  setupPanel.hidden    = false;
+  document.querySelector('.topbar').hidden = true;
+  document.getElementById('incidents-panel').hidden = true;
+  setupStep1.hidden = hasCredentials;
+  setupStep2.hidden = !hasCredentials;
+};
+
+const checkSetup = async () => {
+  try {
+    const res  = await fetch('/setup/status');
+    if (!res.ok) return true;
+    const data = await res.json();
+    if (data.credentials && data.token) return true;
+    _showSetup(data.credentials);
+    return false;
+  } catch { return true; }
+};
+
 /* ── Boot — restaura view do hash ── */
 const _bootRoute = currentRoute();
 const _bootView  = savedViews.find(v => v.id === _bootRoute);
@@ -704,16 +785,26 @@ if (_bootRoute === ROUTE_CONFIG) {
   setFilters((_bootView || savedViews[0]).filters);
 }
 
-loadIncidents()
-  .then(() => { if (_bootRoute === ROUTE_CONFIG) showConfigPanel(); })
-  .catch(err => {
-    incidentBody.replaceChildren();
-    const row  = document.createElement('tr');
-    const cell = document.createElement('td');
-    cell.colSpan = 7; cell.className = 'empty'; cell.textContent = err.message;
-    row.appendChild(cell);
-    incidentBody.appendChild(row);
-  });
+// Verifica URL para erros de OAuth (ex: usuário cancelou autorização)
+const _urlParams = new URLSearchParams(location.search);
+const _setupError = _urlParams.get('setup_error');
+
+checkSetup().then(ready => {
+  if (!ready) {
+    if (_setupError) showSetupFeedback(step2Feedback, `Autorização cancelada: ${_setupError}`, false);
+    return;
+  }
+  loadIncidents()
+    .then(() => { if (_bootRoute === ROUTE_CONFIG) showConfigPanel(); })
+    .catch(err => {
+      incidentBody.replaceChildren();
+      const row  = document.createElement('tr');
+      const cell = document.createElement('td');
+      cell.colSpan = 7; cell.className = 'empty'; cell.textContent = err.message;
+      row.appendChild(cell);
+      incidentBody.appendChild(row);
+    });
+});
 
 /* ── Botão "Rodar bot agora" ── */
 const runBtn    = document.getElementById('run-bot-btn');

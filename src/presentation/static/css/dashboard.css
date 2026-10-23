@@ -569,6 +569,82 @@ tbody tr:hover { background: #fafbf7; }
 .cfg-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .cfg-footer { display: flex; justify-content: flex-end; padding-top: 24px; border-top: 1px solid var(--line); }
 
+/* ── Setup de credenciais ── */
+.setup-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - 120px);
+  padding: 32px 0;
+}
+.setup-card {
+  background: var(--card);
+  border-radius: 20px;
+  padding: 44px 48px;
+  width: 100%;
+  max-width: 460px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0;
+}
+.setup-logo {
+  width: 72px; height: 72px;
+  border-radius: 20px;
+  background: var(--soft);
+  display: grid;
+  place-items: center;
+  margin-bottom: 24px;
+}
+.setup-title { margin: 0 0 10px; font-size: 1.35rem; font-weight: 700; }
+.setup-desc { margin: 0 0 24px; color: var(--ink-2); font-size: 0.84rem; line-height: 1.6; }
+.setup-desc code { background: var(--soft); padding: 1px 6px; border-radius: 5px; font-size: 0.8rem; }
+
+.setup-upload-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 2px dashed var(--line);
+  border-radius: 12px;
+  padding: 24px 16px;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.84rem;
+  transition: border-color .15s, background .15s;
+  margin-bottom: 14px;
+}
+.setup-upload-area:hover { border-color: var(--brand-2); background: var(--soft); }
+.setup-upload-area input { display: none; }
+.setup-upload-area.has-file { border-color: var(--brand-2); color: var(--brand-2); background: var(--ok-soft); }
+
+.setup-btn {
+  width: 100%;
+  height: 44px;
+  font-size: 0.92rem;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  margin-top: 8px;
+}
+.setup-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+.setup-feedback {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  margin-bottom: 12px;
+  text-align: left;
+}
+.setup-feedback.ok   { background: var(--ok-soft);      color: var(--ok); }
+.setup-feedback.err  { background: var(--danger-soft);  color: var(--danger); }
+
 /* ── Responsive ── */
 @media (max-width: 1280px) { .incident-card-grid { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 1180px) {

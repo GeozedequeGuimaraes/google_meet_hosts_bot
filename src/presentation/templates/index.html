@@ -36,6 +36,37 @@
       </aside>
 
       <main class="main">
+
+        <!-- ── Setup de credenciais ── -->
+        <section id="setup-panel" hidden>
+          <div class="setup-wrap">
+            <div class="setup-card">
+              <div class="setup-logo">
+                <svg width="40" height="40" viewBox="0 0 48 48"><path fill="#4285F4" d="M44.5 20H24v8.5h11.8C34.7 33.9 30.1 37 24 37c-7.2 0-13-5.8-13-13s5.8-13 13-13c3.1 0 5.9 1.1 8.1 2.9l6.4-6.4C34.6 5.1 29.6 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21c10.5 0 20-7.8 20-21 0-1.4-.2-2.7-.5-4z"/><path fill="#34A853" d="M6.3 14.7l7 5.1C15.1 16.1 19.2 13 24 13c3.1 0 5.9 1.1 8.1 2.9l6.4-6.4C34.6 5.1 29.6 3 24 3c-7.6 0-14.2 4.3-17.7 11.7z"/><path fill="#FBBC05" d="M24 45c5.5 0 10.5-1.8 14.3-5l-6.6-5.4C29.7 36.3 27 37 24 37c-6.1 0-10.7-3.1-11.8-8.5l-7 5.4C8.8 40.7 15.8 45 24 45z"/><path fill="#EA4335" d="M44.5 20H24v8.5h11.8c-.8 2.5-2.5 4.6-4.8 5.9l6.6 5.4C41.7 36.6 45 31 45 24c0-1.4-.2-2.7-.5-4z"/></svg>
+              </div>
+
+              <div id="setup-step-1">
+                <h2 class="setup-title">Conectar ao Google</h2>
+                <p class="setup-desc">Faça upload do <code>credentials.json</code> obtido no Google Cloud Console para que o bot possa acessar seu Calendário, Meet e Gmail.</p>
+                <label class="setup-upload-area" id="setup-upload-label">
+                  <input type="file" id="credentials-file" accept=".json" />
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
+                  <span id="setup-file-name">Clique para selecionar o arquivo</span>
+                </label>
+                <div id="setup-step1-feedback" class="setup-feedback" style="display:none"></div>
+                <button class="button primary setup-btn" id="setup-upload-btn" disabled type="button">Próximo</button>
+              </div>
+
+              <div id="setup-step-2" hidden>
+                <h2 class="setup-title">Autorizar acesso</h2>
+                <p class="setup-desc">Credenciais carregadas. Clique abaixo para autorizar o bot a acessar sua conta Google — Calendário, Meet e Gmail.</p>
+                <div id="setup-step2-feedback" class="setup-feedback" style="display:none"></div>
+                <a href="/setup/authorize" class="button primary setup-btn" id="setup-authorize-btn">Conectar com o Google</a>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <header class="topbar">
           <div class="welcome">
             <strong>Bem-vindo, equipe V-Lab!</strong>
@@ -139,7 +170,7 @@
           <section class="title-row" id="main-title-row">
             <h1>Meet Operations Dashboard</h1>
             <div id="run-bot-wrap" style="display:flex;align-items:center;gap:12px;margin-top:4px;">
-              <button id="run-bot-btn" class="btn-primary" type="button">Rodar bot agora</button>
+              <button id="run-bot-btn" class="button primary" type="button">Rodar bot agora</button>
               <span id="run-bot-status" class="muted-text" style="font-size:0.82rem;"></span>
             </div>
           </section>

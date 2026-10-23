@@ -1,3 +1,4 @@
+import json
 import os
 import secrets
 import threading
@@ -5,8 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, status
-from fastapi.responses import FileResponse
+from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 
@@ -14,6 +15,7 @@ _HERE = Path(__file__).parent
 _STATIC_DIR = str(_HERE / "static")
 _TEMPLATE_DIR = str(_HERE / "templates")
 
+from src.infrastructure.google.auth import SCOPES
 from src.application.incident_service import IncidentStore
 from src.application.reprocessing_service import reprocessar_incidente
 from src.presentation.api.schemas import (
@@ -221,6 +223,81 @@ def create_app(
     @app.post("/config", response_model=SettingsResponse)
     def save_config(body: SettingsRequest, _: str = Depends(_verify_credentials)):
         return _settings.set_all(body.model_dump())
+
+    # ── Setup de credenciais Google ────────────────────────────────────────
+
+    _oauth_state: dict = {}
+
+    @app.get("/setup/status")
+    def setup_status(_: str = Depends(_verify_credentials)):
+        return {
+            "credentials": os.path.exists(_base_config.credentials_path),
+            "token": os.path.exists(_base_config.token_path),
+        }
+
+    @app.post("/setup/credentials")
+    async def upload_credentials(
+        file: UploadFile = File(...),
+        _: str = Depends(_verify_credentials),
+    ):
+        content = await file.read()
+        try:
+            data = json.loads(content)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Arquivo inválido: não é um JSON válido.")
+        if "installed" not in data and "web" not in data:
+            raise HTTPException(status_code=400, detail="Arquivo inválido: não parece um credentials.json do Google.")
+        path = _base_config.credentials_path
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(content)
+        return {"ok": True}
+
+    @app.get("/setup/authorize")
+    def setup_authorize(request: Request, _: str = Depends(_verify_credentials)):
+        from google_auth_oauthlib.flow import Flow
+        if not os.path.exists(_base_config.credentials_path):
+            raise HTTPException(status_code=400, detail="credentials.json não encontrado.")
+        os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
+        redirect_uri = str(request.base_url).rstrip("/") + "/setup/callback"
+        flow = Flow.from_client_secrets_file(
+            _base_config.credentials_path,
+            scopes=SCOPES,
+            redirect_uri=redirect_uri,
+        )
+        auth_url, state = flow.authorization_url(prompt="consent", access_type="offline")
+        _oauth_state.update({"state": state, "redirect_uri": redirect_uri})
+        return RedirectResponse(auth_url)
+
+    @app.get("/setup/callback")
+    def setup_callback(
+        request: Request,
+        code: Optional[str] = Query(default=None),
+        state: Optional[str] = Query(default=None),
+        error: Optional[str] = Query(default=None),
+    ):
+        if error:
+            return RedirectResponse(f"/?setup_error={error}")
+        stored_state = _oauth_state.get("state")
+        redirect_uri = _oauth_state.get("redirect_uri")
+        if not stored_state or state != stored_state:
+            raise HTTPException(status_code=400, detail="Estado OAuth inválido ou sessão expirada.")
+        from google_auth_oauthlib.flow import Flow
+        os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
+        flow = Flow.from_client_secrets_file(
+            _base_config.credentials_path,
+            scopes=SCOPES,
+            state=stored_state,
+            redirect_uri=redirect_uri,
+        )
+        flow.fetch_token(authorization_response=str(request.url))
+        creds = flow.credentials
+        token_path = _base_config.token_path
+        os.makedirs(os.path.dirname(os.path.abspath(token_path)), exist_ok=True)
+        with open(token_path, "w", encoding="utf-8") as f:
+            f.write(creds.to_json())
+        _oauth_state.clear()
+        return RedirectResponse("/")
 
     return app
 
